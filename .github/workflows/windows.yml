@@ -1,6 +1,6 @@
 on:
   push:
-    branches: [master]
+    branches: [win32]
   pull_request:
 
 name: Windows
