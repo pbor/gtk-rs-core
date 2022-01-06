@@ -374,71 +374,80 @@ macro_rules! g_log {
         use $crate::translate::{IntoGlib, ToGlibPtr};
         use $crate::LogLevel;
 
+        // enforce the right types are passed to the macro
         fn check_log_args(_log_level: LogLevel, _format: &str) {}
-
         check_log_args($log_level, $format);
-        // to prevent the glib formatter to look for arguments which don't exist
-        let f = format!($format, $($arg),*).replace("%", "%%");
-        unsafe {
-            $crate::ffi::g_log(
-                std::ptr::null(),
-                $log_level.into_glib(),
-                f.to_glib_none().0,
-            );
-        }
+
+        $crate::g_log!(@write_log None, $log_level, std::format_args!($format, $($arg),*));
     }};
     ($log_level:expr, $format:literal $(,)?) => {{
         use $crate::translate::{IntoGlib, ToGlibPtr};
         use $crate::LogLevel;
 
+        // enforce the right types are passed to the macro
         fn check_log_args(_log_level: LogLevel, _format: &str) {}
-
         check_log_args($log_level, $format);
-        // to prevent the glib formatter to look for arguments which don't exist
-        let f = $format.replace("%", "%%");
-        unsafe {
-            $crate::ffi::g_log(
-                std::ptr::null(),
-                $log_level.into_glib(),
-                f.to_glib_none().0,
-            );
-        }
+
+        $crate::g_log!(@write_log None, $log_level, std::format_args!($format));
     }};
     ($log_domain:expr, $log_level:expr, $format:literal, $($arg:expr),* $(,)?) => {{
         use $crate::translate::{IntoGlib, ToGlibPtr};
         use $crate::LogLevel;
 
+        // enforce the right types are passed to the macro
         fn check_log_args(_log_level: LogLevel, _format: &str) {}
-
-        // the next line is used to enforce the type for the macro checker...
-        let log_domain: Option<&str> = $log_domain.into();
         check_log_args($log_level, $format);
-        // to prevent the glib formatter to look for arguments which don't exist
-        let f = format!($format, $($arg),*).replace("%", "%%");
-        unsafe {
-            $crate::ffi::g_log(
-                log_domain.to_glib_none().0,
-                $log_level.into_glib(),
-                f.to_glib_none().0,
-            );
-        }
+
+        let log_domain: Option<&str> = $log_domain.into();
+        $crate::g_log!(@write_log log_domain, $log_level, std::format_args!($format, $($arg),*));
     }};
     ($log_domain:expr, $log_level:expr, $format:literal $(,)?) => {{
         use $crate::translate::{IntoGlib, ToGlibPtr};
         use $crate::LogLevel;
 
+        // enforce the right types are passed to the macro
         fn check_log_args(_log_level: LogLevel, _format: &str) {}
-
-        // the next line is used to enforce the type for the macro checker...
-        let log_domain: Option<&str> = $log_domain.into();
         check_log_args($log_level, $format);
-        // to prevent the glib formatter to look for arguments which don't exist
-        let f = $format.replace("%", "%%");
+
+        let log_domain: Option<&str> = $log_domain.into();
+        $crate::g_log!(@write_log log_domain, $log_level, std::format_args!($format));
+    }};
+    (@write_log $log_domain:expr, $log_level:expr, $args:expr) => {{
+        // Replace literal percentage signs with two so that they are
+        // not interpreted as printf format specifiers
+        struct Write($crate::GStringBuilder);
+        impl std::fmt::Write for Write {
+            fn write_str(&mut self, mut s: &str) -> Result<(), std::fmt::Error> {
+                while let Some((prefix, suffix)) = s.split_once('%') {
+                    self.0.append(prefix);
+                    self.0.append("%%");
+                    s = suffix;
+                }
+                self.0.append(s);
+                Ok(())
+            }
+
+            fn write_char(&mut self, c: char) -> std::fmt::Result {
+                if c == '%' {
+                    self.0.append("%%");
+                } else {
+                    self.0.append_c(c);
+                }
+                Ok(())
+            }
+        }
+        let mut w = Write($crate::GStringBuilder::default());
+
+        // Can't really happen but better safe than sorry
+        if std::fmt::write(&mut w, $args).is_err() {
+            return;
+        }
+
         unsafe {
             $crate::ffi::g_log(
-                log_domain.to_glib_none().0,
+                $log_domain.to_glib_none().0,
                 $log_level.into_glib(),
-                f.to_glib_none().0,
+                w.0.into_string().to_glib_none().0,
             );
         }
     }};
